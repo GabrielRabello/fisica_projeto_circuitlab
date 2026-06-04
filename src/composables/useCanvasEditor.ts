@@ -31,7 +31,18 @@ type Drag =
   | { mode: 'idle' }
   | { mode: 'creating'; id: string }
   | { mode: 'moving'; id: string; start: Point; origA: Point; origB: Point }
-  | { mode: 'resizing'; id: string; handle: HandleId }
+  | { mode: 'resizing'; id: string; handle: HandleId; start: Point; orig: Point }
+
+/** Estado do pequeno diálogo de edição de rótulo de terminal. */
+export interface LabelEditorState {
+  id: string
+  handle: HandleId
+  /** Posição (px de mundo = px do canvas) do terminal a rotular. */
+  x: number
+  y: number
+  /** Valor inicial do campo. */
+  value: string
+}
 
 export function useCanvasEditor() {
   const store = useCircuitStore()
@@ -43,6 +54,9 @@ export function useCanvasEditor() {
   let frame = 0
   let drag: Drag = { mode: 'idle' }
   let resizeObserver: ResizeObserver | null = null
+
+  /** Diálogo de rótulo aberto (null = fechado). Consumido pelo CanvasEditor. */
+  const labelEditor = ref<LabelEditorState | null>(null)
 
   const snapP = (p: Point): Point => snap(p, SNAP)
 
@@ -161,8 +175,9 @@ export function useCanvasEditor() {
     if (selectedId) {
       const selected = store.graph.components[selectedId]
       const handle = selected ? handleAt(selected, p) : null
-      if (handle) {
-        drag = { mode: 'resizing', id: selectedId, handle }
+      if (handle && selected) {
+        const orig = { ...(handle === 'a' ? selected.a : selected.b) }
+        drag = { mode: 'resizing', id: selectedId, handle, start: p, orig }
         return
       }
     }
@@ -218,10 +233,48 @@ export function useCanvasEditor() {
       const id = drag.id
       store.setTool('select')
       store.select(id)
+    } else if (drag.mode === 'resizing') {
+      // Clique na alça (sem arraste) edita o rótulo; arraste redimensiona.
+      if (dist(toWorld(e), drag.start) < CLICK_THRESHOLD) {
+        const restore = drag.handle === 'a' ? { a: drag.orig } : { b: drag.orig }
+        store.updateComponent(drag.id, restore)
+        const c = store.graph.components[drag.id]
+        if (c && (c.kind === 'wire' || c.kind === 'resistor')) {
+          openLabelEditor(drag.id, drag.handle)
+        }
+      }
     }
 
     drag = { mode: 'idle' }
     requestRender()
+  }
+
+  // --- Edição de rótulo ---
+  function openLabelEditor(id: string, handle: HandleId): void {
+    const c = store.graph.components[id]
+    if (!c) return
+    const point = handle === 'a' ? c.a : c.b
+    labelEditor.value = {
+      id,
+      handle,
+      x: point.x,
+      y: point.y,
+      value: (handle === 'a' ? c.labelA : c.labelB) ?? '',
+    }
+  }
+
+  function commitLabel(text: string): void {
+    const editor = labelEditor.value
+    if (!editor) return
+    const value = text.trim().slice(0, 3)
+    const patch = editor.handle === 'a' ? { labelA: value || undefined } : { labelB: value || undefined }
+    store.updateComponent(editor.id, patch)
+    labelEditor.value = null
+    requestRender()
+  }
+
+  function cancelLabel(): void {
+    labelEditor.value = null
   }
 
   /** Duplo-clique numa chave alterna entre aberta e fechada. */
@@ -238,6 +291,10 @@ export function useCanvasEditor() {
 
   // --- Teclado ---
   function onKeyDown(e: KeyboardEvent): void {
+    // Ignora atalhos enquanto se digita num campo (ex.: o diálogo de rótulo).
+    const target = e.target as HTMLElement | null
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+
     switch (e.key) {
       case 'Delete':
       case 'Backspace':
@@ -313,5 +370,5 @@ export function useCanvasEditor() {
     },
   )
 
-  return { canvasRef }
+  return { canvasRef, labelEditor, commitLabel, cancelLabel }
 }

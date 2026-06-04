@@ -6,7 +6,7 @@
  * estado global — recebe tudo via `Scene`, o que mantém o render testável e
  * desacoplado do Vue/store.
  */
-import type { CircuitComponent, ComponentId } from '@/types/circuit'
+import type { CircuitComponent, ComponentId, Point } from '@/types/circuit'
 import { colors, GRID_SIZE, HANDLE_SIZE, STROKE_WIDTH, SYMBOL_AMPLITUDE } from './constants'
 import { drawResistor, drawSource, drawSwitch, drawWire } from './symbols'
 
@@ -30,6 +30,8 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: Scene): void {
     ctx.lineWidth = STROKE_WIDTH
     drawComponent(ctx, c)
     drawTerminals(ctx, c)
+    if (c.labelA) drawLabel(ctx, c.a, c.labelA)
+    if (c.labelB) drawLabel(ctx, c.b, c.labelB)
   }
 
   const selected = scene.selectedId
@@ -70,6 +72,22 @@ function drawComponent(ctx: CanvasRenderingContext2D, c: CircuitComponent): void
       drawWire(ctx, c.a, c.b)
       break
   }
+}
+
+/** Rótulo curto junto a um terminal, com halo branco para legibilidade. */
+function drawLabel(ctx: CanvasRenderingContext2D, p: Point, text: string): void {
+  ctx.save()
+  ctx.font = '600 11px system-ui, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'bottom'
+  const x = p.x
+  const y = p.y - 7
+  ctx.lineWidth = 3
+  ctx.strokeStyle = colors.background
+  ctx.strokeText(text, x, y)
+  ctx.fillStyle = colors.label
+  ctx.fillText(text, x, y)
+  ctx.restore()
 }
 
 /** Pequenos pontos nas extremidades sugerindo os pontos de conexão. */
