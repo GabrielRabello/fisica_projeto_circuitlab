@@ -17,6 +17,7 @@ const tools: ToolDef[] = [
   { id: 'wire', label: 'Fio / corrente', shortcut: 'W' },
   { id: 'resistor', label: 'Resistor', shortcut: 'R' },
   { id: 'voltage-source', label: 'Fonte de tensão', shortcut: 'B' },
+  { id: 'switch', label: 'Chave (duplo-clique abre/fecha)', shortcut: 'S' },
 ]
 </script>
 
@@ -46,11 +47,19 @@ const tools: ToolDef[] = [
         <path d="M2 12h3l2-5 3 10 3-10 3 10 2-5h3" />
       </svg>
       <!-- Fonte -->
-      <svg v-else viewBox="0 0 24 24" class="palette__icon">
+      <svg v-else-if="tool.id === 'voltage-source'" viewBox="0 0 24 24" class="palette__icon">
         <line x1="3" y1="12" x2="9" y2="12" />
         <line x1="9" y1="4" x2="9" y2="20" />
         <line x1="14" y1="8" x2="14" y2="16" stroke-width="3" />
         <line x1="14" y1="12" x2="21" y2="12" />
+      </svg>
+      <!-- Chave (aberta) -->
+      <svg v-else viewBox="0 0 24 24" class="palette__icon">
+        <line x1="3" y1="16" x2="8" y2="16" />
+        <line x1="8" y1="16" x2="16" y2="8" />
+        <line x1="16" y1="16" x2="21" y2="16" />
+        <circle cx="8" cy="16" r="1.6" fill="currentColor" stroke="none" />
+        <circle cx="16" cy="16" r="1.6" fill="currentColor" stroke="none" />
       </svg>
       <span class="palette__shortcut">{{ tool.shortcut }}</span>
     </button>
