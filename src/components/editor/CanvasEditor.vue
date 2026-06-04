@@ -1,24 +1,29 @@
 <script setup lang="ts">
-// Editor visual — canvas interativo.
-// Responsável por: drag-and-drop, paleta, snap-to-grid e desenho do circuito.
-// TODO: implementar render no <canvas> e interações de edição.
+// Editor visual — superfície de desenho. Toda a interação (criar, mover,
+// redimensionar) e a renderização vivem no composable useCanvasEditor.
+import { useCanvasEditor } from '@/composables/useCanvasEditor'
+
+const { canvasRef } = useCanvasEditor()
 </script>
 
 <template>
-  <section class="canvas-editor">
+  <div class="canvas-editor">
     <canvas ref="canvasRef" class="canvas-editor__surface" />
-  </section>
+  </div>
 </template>
 
 <style scoped>
 .canvas-editor {
-  position: relative;
-  overflow: hidden;
+  position: absolute;
+  inset: 0;
 }
 
 .canvas-editor__surface {
   display: block;
   width: 100%;
   height: 100%;
+  background: #fff;
+  /* Garante que o arraste no canvas não role/zoome a página. */
+  touch-action: none;
 }
 </style>
