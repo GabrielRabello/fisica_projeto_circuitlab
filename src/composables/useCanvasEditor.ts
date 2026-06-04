@@ -33,15 +33,38 @@ type Drag =
   | { mode: 'moving'; id: string; start: Point; origA: Point; origB: Point }
   | { mode: 'resizing'; id: string; handle: HandleId; start: Point; orig: Point }
 
-/** Estado do pequeno diálogo de edição de rótulo de terminal. */
+/** Alvo do rótulo: terminal A, terminal B ou centro do componente. */
+export type LabelTarget = HandleId | 'center'
+
+/** Estado do pequeno diálogo de edição de rótulo. */
 export interface LabelEditorState {
   id: string
-  handle: HandleId
-  /** Posição (px de mundo = px do canvas) do terminal a rotular. */
+  target: LabelTarget
+  /** Posição (px de mundo = px do canvas) do ponto a rotular. */
   x: number
   y: number
   /** Valor inicial do campo. */
   value: string
+  /** Limite de caracteres (terminais: 3; centro: maior). */
+  maxLength: number
+}
+
+/** Operações disponíveis no menu de contexto de um componente. */
+export type ContextAction =
+  | 'lock'
+  | 'unlock'
+  | 'duplicate'
+  | 'hide-title'
+  | 'show-title'
+  | 'hide-labels'
+  | 'show-labels'
+
+/** Estado do menu de contexto (clique direito). */
+export interface ContextMenuState {
+  id: string
+  /** Posição (px do canvas) onde o menu deve abrir. */
+  x: number
+  y: number
 }
 
 export function useCanvasEditor() {
@@ -57,6 +80,9 @@ export function useCanvasEditor() {
 
   /** Diálogo de rótulo aberto (null = fechado). Consumido pelo CanvasEditor. */
   const labelEditor = ref<LabelEditorState | null>(null)
+
+  /** Menu de contexto aberto (null = fechado). Consumido pelo CanvasEditor. */
+  const contextMenu = ref<ContextMenuState | null>(null)
 
   const snapP = (p: Point): Point => snap(p, SNAP)
 
@@ -111,11 +137,21 @@ export function useCanvasEditor() {
     return distToSegment(p, c.a, c.b) <= tol
   }
 
-  /** Componente mais ao topo (último desenhado) sob o ponto. */
-  function topmostAt(p: Point): CircuitComponent | null {
+  function countResistors(): number {
+    return Object.values(store.graph.components).filter((c) => c.kind === 'resistor').length
+  }
+
+  /**
+   * Componente mais ao topo (último desenhado) sob o ponto.
+   * Por padrão ignora componentes travados (não são manipuláveis); passe
+   * `includeLocked` para alcançá-los (ex.: menu de contexto/destravar).
+   */
+  function topmostAt(p: Point, includeLocked = false): CircuitComponent | null {
     const list = Object.values(store.graph.components)
     for (let i = list.length - 1; i >= 0; i--) {
-      if (hitsBody(list[i], p)) return list[i]
+      const c = list[i]
+      if (!includeLocked && c.locked) continue
+      if (hitsBody(c, p)) return c
     }
     return null
   }
@@ -144,6 +180,9 @@ export function useCanvasEditor() {
 
   // --- Pointer handlers ---
   function onPointerDown(e: PointerEvent): void {
+    // Apenas o botão esquerdo desenha/seleciona; o direito abre o menu.
+    if (e.button !== 0) return
+    closeContextMenu()
     const canvas = canvasRef.value!
     canvas.setPointerCapture(e.pointerId)
     const p = toWorld(e)
@@ -163,6 +202,8 @@ export function useCanvasEditor() {
       }
       // Chave nasce aberta (circuito interrompido).
       if (kind === 'switch') component.closed = false
+      // Resistor recebe rótulo padrão R_n (n = nº de resistores, contando este).
+      if (kind === 'resistor') component.label = `R_${countResistors() + 1}`
       store.addComponent(component)
       store.select(id)
       drag = { mode: 'creating', id }
@@ -221,7 +262,8 @@ export function useCanvasEditor() {
   }
 
   function onPointerUp(e: PointerEvent): void {
-    canvasRef.value?.releasePointerCapture(e.pointerId)
+    const canvas = canvasRef.value
+    if (canvas?.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId)
 
     if (drag.mode === 'creating') {
       const c = store.graph.components[drag.id]
@@ -250,24 +292,32 @@ export function useCanvasEditor() {
   }
 
   // --- Edição de rótulo ---
-  function openLabelEditor(id: string, handle: HandleId): void {
+  function openLabelEditor(id: string, target: LabelTarget): void {
     const c = store.graph.components[id]
     if (!c) return
-    const point = handle === 'a' ? c.a : c.b
+    const point =
+      target === 'a' ? c.a : target === 'b' ? c.b : { x: (c.a.x + c.b.x) / 2, y: (c.a.y + c.b.y) / 2 }
+    const current = target === 'a' ? c.labelA : target === 'b' ? c.labelB : c.label
     labelEditor.value = {
       id,
-      handle,
+      target,
       x: point.x,
       y: point.y,
-      value: (handle === 'a' ? c.labelA : c.labelB) ?? '',
+      value: current ?? '',
+      maxLength: target === 'center' ? 6 : 3,
     }
   }
 
   function commitLabel(text: string): void {
     const editor = labelEditor.value
     if (!editor) return
-    const value = text.trim().slice(0, 3)
-    const patch = editor.handle === 'a' ? { labelA: value || undefined } : { labelB: value || undefined }
+    const value = text.trim().slice(0, editor.maxLength) || undefined
+    const patch: Partial<CircuitComponent> =
+      editor.target === 'a'
+        ? { labelA: value }
+        : editor.target === 'b'
+          ? { labelB: value }
+          : { label: value }
     store.updateComponent(editor.id, patch)
     labelEditor.value = null
     requestRender()
@@ -277,15 +327,102 @@ export function useCanvasEditor() {
     labelEditor.value = null
   }
 
-  /** Duplo-clique numa chave alterna entre aberta e fechada. */
+  // --- Menu de contexto (clique direito) ---
+  function onContextMenu(e: MouseEvent): void {
+    e.preventDefault()
+    const rect = canvasRef.value!.getBoundingClientRect()
+    const p: Point = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    // Inclui travados para que possam ser destravados.
+    const hit = topmostAt(p, true)
+    if (!hit) {
+      closeContextMenu()
+      return
+    }
+    // Destaca o alvo apenas se não estiver travado (seleção implica edição).
+    if (!hit.locked) store.select(hit.id)
+    contextMenu.value = { id: hit.id, x: p.x, y: p.y }
+  }
+
+  function closeContextMenu(): void {
+    contextMenu.value = null
+  }
+
+  /** Fecha o menu ao apontar fora dele (mas não ao clicar num item). */
+  function onWindowPointerDown(e: PointerEvent): void {
+    if (!contextMenu.value) return
+    const target = e.target as HTMLElement | null
+    if (target && target.closest('.context-menu')) return
+    closeContextMenu()
+  }
+
+  /** Cria uma cópia deslocada do componente, sem rótulos herdados. */
+  function duplicateComponent(id: string): void {
+    const c = store.graph.components[id]
+    if (!c) return
+    const offset = { x: SNAP, y: SNAP }
+    const copyId = crypto.randomUUID()
+    const copy: CircuitComponent = {
+      id: copyId,
+      kind: c.kind,
+      a: add(c.a, offset),
+      b: add(c.b, offset),
+      value: c.value,
+    }
+    if (c.kind === 'switch') copy.closed = c.closed ?? false
+    // Reseta rótulos: resistor recebe um novo título padrão; demais ficam sem.
+    if (c.kind === 'resistor') copy.label = `R_${countResistors() + 1}`
+    store.addComponent(copy)
+    store.select(copyId)
+  }
+
+  function runContextAction(action: ContextAction): void {
+    const menu = contextMenu.value
+    if (!menu) return
+    const id = menu.id
+    switch (action) {
+      case 'lock':
+        store.updateComponent(id, { locked: true })
+        if (store.selectedId === id) store.select(null)
+        break
+      case 'unlock':
+        store.updateComponent(id, { locked: false })
+        break
+      case 'duplicate':
+        duplicateComponent(id)
+        break
+      case 'hide-title':
+        store.updateComponent(id, { titleHidden: true })
+        break
+      case 'show-title':
+        store.updateComponent(id, { titleHidden: false })
+        break
+      case 'hide-labels':
+        store.updateComponent(id, { labelsHidden: true })
+        break
+      case 'show-labels':
+        store.updateComponent(id, { labelsHidden: false })
+        break
+    }
+    closeContextMenu()
+    requestRender()
+  }
+
+  /**
+   * Duplo-clique no corpo: alterna a chave (aberta/fechada) ou edita o rótulo
+   * central do resistor.
+   */
   function onDoubleClick(e: MouseEvent): void {
     const rect = canvasRef.value!.getBoundingClientRect()
     const p: Point = { x: e.clientX - rect.left, y: e.clientY - rect.top }
     const hit = topmostAt(p)
-    if (hit && hit.kind === 'switch') {
+    if (!hit || hit.locked) return
+    if (hit.kind === 'switch') {
       store.updateComponent(hit.id, { closed: !(hit.closed ?? false) })
       store.select(hit.id)
       requestRender()
+    } else if (hit.kind === 'resistor') {
+      store.select(hit.id)
+      openLabelEditor(hit.id, 'center')
     }
   }
 
@@ -305,6 +442,7 @@ export function useCanvasEditor() {
         }
         break
       case 'Escape':
+        closeContextMenu()
         store.setTool('select')
         store.select(null)
         requestRender()
@@ -345,7 +483,9 @@ export function useCanvasEditor() {
     canvas.addEventListener('pointermove', onPointerMove)
     canvas.addEventListener('pointerup', onPointerUp)
     canvas.addEventListener('dblclick', onDoubleClick)
+    canvas.addEventListener('contextmenu', onContextMenu)
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('pointerdown', onWindowPointerDown)
   })
 
   onUnmounted(() => {
@@ -355,7 +495,9 @@ export function useCanvasEditor() {
     canvas?.removeEventListener('pointermove', onPointerMove)
     canvas?.removeEventListener('pointerup', onPointerUp)
     canvas?.removeEventListener('dblclick', onDoubleClick)
+    canvas?.removeEventListener('contextmenu', onContextMenu)
     window.removeEventListener('keydown', onKeyDown)
+    window.removeEventListener('pointerdown', onWindowPointerDown)
     if (frame) cancelAnimationFrame(frame)
   })
 
@@ -370,5 +512,13 @@ export function useCanvasEditor() {
     },
   )
 
-  return { canvasRef, labelEditor, commitLabel, cancelLabel }
+  return {
+    canvasRef,
+    labelEditor,
+    commitLabel,
+    cancelLabel,
+    contextMenu,
+    runContextAction,
+    closeContextMenu,
+  }
 }

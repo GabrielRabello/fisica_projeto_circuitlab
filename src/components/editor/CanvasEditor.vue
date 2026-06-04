@@ -1,12 +1,22 @@
 <script setup lang="ts">
 // Editor visual — superfície de desenho. Toda a interação (criar, mover,
 // redimensionar) e a renderização vivem no composable useCanvasEditor. Aqui
-// também é montado o pequeno diálogo de rótulo de terminal.
+// também são montados o diálogo de rótulo e o menu de contexto.
 import { computed, nextTick, ref, watch } from 'vue'
 
+import ComponentContextMenu from './ComponentContextMenu.vue'
 import { useCanvasEditor } from '@/composables/useCanvasEditor'
+import { useCircuitStore } from '@/stores/circuitStore'
 
-const { canvasRef, labelEditor, commitLabel, cancelLabel } = useCanvasEditor()
+const { canvasRef, labelEditor, commitLabel, cancelLabel, contextMenu, runContextAction } =
+  useCanvasEditor()
+
+const store = useCircuitStore()
+
+// Componente alvo do menu de contexto (reativo ao estado do store).
+const menuComponent = computed(() =>
+  contextMenu.value ? store.graph.components[contextMenu.value.id] : undefined,
+)
 
 const inputRef = ref<HTMLInputElement | null>(null)
 const labelText = ref('')
@@ -41,14 +51,22 @@ function onCommit(): void {
         v-model="labelText"
         class="label-dialog__input"
         type="text"
-        maxlength="3"
+        :maxlength="labelEditor.maxLength"
         placeholder="A1"
-        aria-label="Rótulo do terminal"
+        aria-label="Rótulo"
         @keydown.enter.prevent="onCommit"
         @keydown.esc.prevent="cancelLabel"
         @blur="onCommit"
       />
     </div>
+
+    <ComponentContextMenu
+      v-if="contextMenu && menuComponent"
+      :x="contextMenu.x"
+      :y="contextMenu.y"
+      :component="menuComponent"
+      @action="runContextAction"
+    />
   </div>
 </template>
 
@@ -79,7 +97,7 @@ function onCommit(): void {
 }
 
 .label-dialog__input {
-  width: 48px;
+  width: 56px;
   padding: 4px 6px;
   border: 1px solid #d6d4ff;
   border-radius: 5px;
