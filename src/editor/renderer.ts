@@ -7,7 +7,18 @@
  * desacoplado do Vue/store.
  */
 import type { CircuitComponent, ComponentId, Point } from '@/types/circuit'
-import { colors, GRID_SIZE, HANDLE_SIZE, STROKE_WIDTH, SYMBOL_AMPLITUDE } from './constants'
+import type { ComponentFlow } from '@/engine/currentFlow'
+import {
+  colors,
+  FLOW_DOT_RADIUS,
+  FLOW_DOT_SPACING,
+  FLOW_MAX_SPEED,
+  FLOW_MIN_SPEED,
+  GRID_SIZE,
+  HANDLE_SIZE,
+  STROKE_WIDTH,
+  SYMBOL_AMPLITUDE,
+} from './constants'
 import { drawResistor, drawSource, drawSwitch, drawWire } from './symbols'
 import { formatQuantity } from '@/utils/units'
 
@@ -23,6 +34,12 @@ export interface Scene {
   height: number
   components: CircuitComponent[]
   selectedId: ComponentId | null
+  /** Fluxo de corrente por componente (anima o caminho); ausente = sem animação. */
+  flow?: Record<ComponentId, ComponentFlow>
+  /** Tempo acumulado (s) que avança os pontos do fluxo. */
+  flowTime?: number
+  /** Maior corrente da malha (A), para normalizar a velocidade dos pontos. */
+  flowMaxCurrent?: number
 }
 
 export function renderScene(ctx: CanvasRenderingContext2D, scene: Scene): void {
@@ -54,10 +71,60 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: Scene): void {
     }
   }
 
+  // Pontos animados sobre os componentes que conduzem (sobre os símbolos).
+  if (scene.flow) {
+    const time = scene.flowTime ?? 0
+    const maxI = scene.flowMaxCurrent ?? 0
+    for (const c of scene.components) {
+      const f = scene.flow[c.id]
+      if (f) drawFlow(ctx, c.a, c.b, f, time, maxI)
+    }
+  }
+
   const selected = scene.selectedId
     ? scene.components.find((c) => c.id === scene.selectedId)
     : undefined
   if (selected) drawSelection(ctx, selected)
+}
+
+/**
+ * Desenha os pontos da corrente deslizando ao longo do eixo `a`→`b`, no sentido
+ * do fluxo. A velocidade cresce suavemente com a intensidade (mais corrente =
+ * pontos mais rápidos); cada ponto leva um halo branco para destacar do símbolo.
+ */
+function drawFlow(
+  ctx: CanvasRenderingContext2D,
+  a: Point,
+  b: Point,
+  flow: ComponentFlow,
+  time: number,
+  maxCurrent: number,
+): void {
+  const len = Math.hypot(b.x - a.x, b.y - a.y)
+  if (len < 1) return
+  const ux = (b.x - a.x) / len
+  const uy = (b.y - a.y) / len
+
+  const ratio = maxCurrent > 0 ? flow.current / maxCurrent : 1
+  const speed = FLOW_MIN_SPEED + (FLOW_MAX_SPEED - FLOW_MIN_SPEED) * Math.sqrt(ratio)
+  // Deslocamento dentro de um período (0..spacing), sempre positivo.
+  const offset = (((time * speed) % FLOW_DOT_SPACING) + FLOW_DOT_SPACING) % FLOW_DOT_SPACING
+
+  ctx.save()
+  ctx.fillStyle = colors.current
+  ctx.strokeStyle = colors.background
+  ctx.lineWidth = 1
+  for (let d = offset; d < len; d += FLOW_DOT_SPACING) {
+    // direction +1: avança de `a`→`b`; -1: de `b`→`a`.
+    const dist = flow.direction === 1 ? d : len - d
+    const x = a.x + ux * dist
+    const y = a.y + uy * dist
+    ctx.beginPath()
+    ctx.arc(x, y, FLOW_DOT_RADIUS, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+  }
+  ctx.restore()
 }
 
 function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number): void {

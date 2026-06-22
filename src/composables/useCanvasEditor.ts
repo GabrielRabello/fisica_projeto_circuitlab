@@ -22,9 +22,10 @@ import {
   SYMBOL_AMPLITUDE,
 } from '@/editor/constants'
 import { renderScene } from '@/editor/renderer'
+import { computeCurrentFlow, type ComponentFlow } from '@/engine/currentFlow'
 import { add, dist, distToSegment, snap, sub } from '@/geometry/vector'
 import { useCircuitStore } from '@/stores/circuitStore'
-import type { CircuitComponent, ComponentKind, Point } from '@/types/circuit'
+import type { CircuitComponent, ComponentId, ComponentKind, Point } from '@/types/circuit'
 import type { HandleId } from '@/types/editor'
 
 type Drag =
@@ -78,6 +79,18 @@ export function useCanvasEditor() {
   let drag: Drag = { mode: 'idle' }
   let resizeObserver: ResizeObserver | null = null
 
+  // --- Animação do fluxo de corrente ---
+  /** Sentido/intensidade por componente que conduz (null = sem fluxo). */
+  let flowMap: Record<ComponentId, ComponentFlow> | null = null
+  /** Maior corrente da malha, para normalizar a velocidade dos pontos. */
+  let flowMax = 0
+  /** Tempo acumulado (s) que avança os pontos. */
+  let flowTime = 0
+  /** Handle do rAF do laço de animação (0 = parado). */
+  let flowFrame = 0
+  /** Timestamp do quadro anterior, para o passo de tempo. */
+  let flowLastTs = 0
+
   /** Diálogo de rótulo aberto (null = fechado). Consumido pelo CanvasEditor. */
   const labelEditor = ref<LabelEditorState | null>(null)
 
@@ -94,16 +107,59 @@ export function useCanvasEditor() {
       height,
       components: Object.values(store.graph.components),
       selectedId: store.selectedId,
+      flow: flowMap ?? undefined,
+      flowTime,
+      flowMaxCurrent: flowMax,
     })
   }
 
   /** Agenda um redesenho coalescido no próximo quadro. */
   function requestRender(): void {
-    if (frame) return
+    // O laço de animação já redesenha a cada quadro; evita trabalho redundante.
+    if (frame || flowFrame) return
     frame = requestAnimationFrame(() => {
       frame = 0
       draw()
     })
+  }
+
+  // --- Laço de animação do fluxo ---
+  /** Recalcula o fluxo a partir do resultado da simulação e (re)inicia o laço. */
+  function recomputeFlow(): void {
+    const res = store.result
+    if (!res) return stopFlow()
+    const map = computeCurrentFlow(store.graph, res)
+    const ids = Object.keys(map)
+    if (ids.length === 0) return stopFlow()
+    flowMap = map
+    flowMax = ids.reduce((m, id) => Math.max(m, map[id].current), 0)
+    startFlow()
+  }
+
+  function flowStep(ts: number): void {
+    if (!flowMap) {
+      flowFrame = 0
+      return
+    }
+    if (!flowLastTs) flowLastTs = ts
+    flowTime += (ts - flowLastTs) / 1000
+    flowLastTs = ts
+    draw()
+    flowFrame = requestAnimationFrame(flowStep)
+  }
+
+  function startFlow(): void {
+    if (flowFrame) return
+    flowLastTs = 0
+    flowFrame = requestAnimationFrame(flowStep)
+  }
+
+  function stopFlow(): void {
+    if (flowFrame) cancelAnimationFrame(flowFrame)
+    flowFrame = 0
+    flowMap = null
+    flowTime = 0
+    requestRender()
   }
 
   function resize(): void {
@@ -486,6 +542,7 @@ export function useCanvasEditor() {
     canvas.addEventListener('contextmenu', onContextMenu)
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('pointerdown', onWindowPointerDown)
+    recomputeFlow() // cobre o caso de já haver resultado ao montar.
   })
 
   onUnmounted(() => {
@@ -499,11 +556,14 @@ export function useCanvasEditor() {
     window.removeEventListener('keydown', onKeyDown)
     window.removeEventListener('pointerdown', onWindowPointerDown)
     if (frame) cancelAnimationFrame(frame)
+    if (flowFrame) cancelAnimationFrame(flowFrame)
   })
 
   // Redesenha quando o documento/seleção mudam por outras vias (toolbar, etc.).
   watch(() => store.graph, requestRender, { deep: true })
   watch(() => store.selectedId, requestRender)
+  // Recalcula o fluxo a cada nova simulação (o resultado é reatribuído por edit).
+  watch(() => store.result, recomputeFlow)
   watch(
     () => store.activeTool,
     () => {

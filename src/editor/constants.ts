@@ -38,7 +38,17 @@ export const colors = {
   label: '#4a42c9',
   value: '#6b6b6b',
   lock: '#8a8a8a',
+  current: '#1c7ed6', // pontos animados do caminho da corrente
 } as const
+
+/** Animação do fluxo de corrente. */
+/** Espaçamento entre os pontos que deslizam pelo condutor, em px. */
+export const FLOW_DOT_SPACING = 16
+/** Raio de cada ponto de fluxo, em px. */
+export const FLOW_DOT_RADIUS = 2.4
+/** Velocidade mínima/máxima de deslize (px/s), modulada pela corrente. */
+export const FLOW_MIN_SPEED = 14
+export const FLOW_MAX_SPEED = 46
 
 /** Valor elétrico inicial de cada tipo de componente. */
 export const DEFAULT_VALUE: Record<ComponentKind, number> = {
