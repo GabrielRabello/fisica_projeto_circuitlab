@@ -3,6 +3,7 @@
 // resultados flutuando por cima (estética inspirada no Excalidraw).
 import CanvasEditor from './components/editor/CanvasEditor.vue'
 import ComponentPalette from './components/editor/ComponentPalette.vue'
+import PropertiesPanel from './components/editor/PropertiesPanel.vue'
 import ResultsPanel from './components/results/ResultsPanel.vue'
 </script>
 
@@ -10,6 +11,7 @@ import ResultsPanel from './components/results/ResultsPanel.vue'
   <div class="app">
     <CanvasEditor />
     <ComponentPalette class="app__toolbar" />
+    <PropertiesPanel class="app__props" />
     <ResultsPanel class="app__results" />
   </div>
 </template>
@@ -26,6 +28,13 @@ import ResultsPanel from './components/results/ResultsPanel.vue'
   top: 16px;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 10;
+}
+
+.app__props {
+  position: absolute;
+  top: 16px;
+  left: 16px;
   z-index: 10;
 }
 

@@ -9,6 +9,13 @@
 import type { CircuitComponent, ComponentId, Point } from '@/types/circuit'
 import { colors, GRID_SIZE, HANDLE_SIZE, STROKE_WIDTH, SYMBOL_AMPLITUDE } from './constants'
 import { drawResistor, drawSource, drawSwitch, drawWire } from './symbols'
+import { formatQuantity } from '@/utils/units'
+
+/** Unidade do valor elétrico exibido para cada tipo (vazio = não exibe). */
+const VALUE_UNIT: Partial<Record<CircuitComponent['kind'], string>> = {
+  resistor: 'Ω',
+  'voltage-source': 'V',
+}
 
 export interface Scene {
   /** Largura/altura em px de mundo (CSS). */
@@ -36,6 +43,11 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: Scene): void {
     }
     if (c.label && !c.titleHidden) {
       drawCenterLabel(ctx, { x: (c.a.x + c.b.x) / 2, y: (c.a.y + c.b.y) / 2 }, c.label)
+    }
+    const unit = VALUE_UNIT[c.kind]
+    if (unit) {
+      const mid = { x: (c.a.x + c.b.x) / 2, y: (c.a.y + c.b.y) / 2 }
+      drawValueLabel(ctx, { x: mid.x, y: mid.y - (SYMBOL_AMPLITUDE + 10) }, formatQuantity(c.value, unit))
     }
     if (c.locked) {
       drawLockBadge(ctx, { x: (c.a.x + c.b.x) / 2, y: (c.a.y + c.b.y) / 2 + SYMBOL_AMPLITUDE + 14 })
@@ -148,6 +160,14 @@ function drawLabel(ctx: CanvasRenderingContext2D, p: Point, text: string): void 
   ctx.save()
   ctx.textBaseline = 'bottom'
   drawScriptText(ctx, p.x, p.y - 7, text, 11, colors.label, colors.background)
+  ctx.restore()
+}
+
+/** Valor elétrico (ex.: "1 kΩ", "9 V") em texto discreto acima do componente. */
+function drawValueLabel(ctx: CanvasRenderingContext2D, p: Point, text: string): void {
+  ctx.save()
+  ctx.textBaseline = 'bottom'
+  drawScriptText(ctx, p.x, p.y, text, 11, colors.value, colors.background)
   ctx.restore()
 }
 

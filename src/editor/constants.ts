@@ -36,6 +36,7 @@ export const colors = {
   handleFill: '#ffffff',
   handleStroke: '#6965db',
   label: '#4a42c9',
+  value: '#6b6b6b',
   lock: '#8a8a8a',
 } as const
 
